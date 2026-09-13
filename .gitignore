@@ -1,0 +1,10 @@
+# Python
+__pycache__/
+*.pyc
+.venv*/
+
+# deploy-all.sh のステージング生成物
+_build/
+
+# テンプレートから生成される実体（アカウント ID を含む）
+.bedrock_agentcore.yaml
