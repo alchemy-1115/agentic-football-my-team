@@ -27,6 +27,19 @@ def test_summarize():
     print(summary)
     assert "Match status:" in summary, "FAIL: pre-computed match status line missing"
     assert "Coach: ACM" in summary, "FAIL: teamChat coach instructions not in summary"
+    # Stamina arrives as 0.0-1.0 — it must not collapse to stam=0/stam=1
+    me = next(p for p in GAME_STATE["players"]
+              if p["teamCode"] == "home" and p["agentId"].endswith(f"_{MY_PLAYER_ID}"))
+    expected_stam = f"stam={me['stamina'] * 100:.0f}%"
+    assert expected_stam in summary, f"FAIL: expected '{expected_stam}' in summary"
+    # Open-goal flag: mock away GK sits 5 units off their goal; move them out to x=20
+    assert "Opponent GK: distFromTheirGoal=5.0" in summary, "FAIL: opponent GK line missing"
+    assert "OPEN GOAL" not in summary, "FAIL: OPEN GOAL flagged while GK is on their line"
+    rushed = state_with_coach()
+    next(p for p in rushed["players"]
+         if p["teamCode"] == "away" and p["agentId"] == "agentId_0")["position"]["x"] = 20
+    assert "OPEN GOAL" in summarize_state(rushed, TEAM_ID, MY_PLAYER_ID, POSITION_LABEL), \
+        "FAIL: OPEN GOAL not flagged with opponent GK 35 units off their goal"
     if MY_PLAYER_ID in (1, 2):
         # C&C line is hidden during our own possession (mock state: our P3 has the ball)
         assert "Challenge&Cover" not in summary, "FAIL: C&C line shown during our own possession"
@@ -53,6 +66,13 @@ def test_fallback():
     for c in cmds:
         print(f"  P{c.get('playerId')} T{c.get('teamId')}: {c['commandType']} {c.get('parameters', {})}")
     assert all(c["playerId"] == MY_PLAYER_ID for c in cmds), "FAIL: wrong playerId in fallback"
+    # With the ball ourselves, the fallback must never pass to ourselves
+    on_ball = json.loads(json.dumps(GAME_STATE))
+    on_ball["ball"]["possessionAgentId"] = f"agentId_{MY_PLAYER_ID}"
+    for c in fallback_commands(on_ball, TEAM_ID, MY_PLAYER_ID):
+        print(f"  (on ball) P{c.get('playerId')}: {c['commandType']} {c.get('parameters', {})}")
+        assert c.get("parameters", {}).get("target_player_id") != MY_PLAYER_ID, \
+            "FAIL: fallback passes to itself"
     print("  [OK]")
     print()
 

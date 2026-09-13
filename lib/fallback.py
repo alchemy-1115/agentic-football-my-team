@@ -226,13 +226,16 @@ def _on_ball(cfg, game_state, players, team_id, my_player_id, pos, my_goal_x, op
         if abs(pos.get("x", 0) - opp_goal_x) < cfg.shoot_threshold:
             return [_cmd("SHOOT", my_player_id, team_id,
                          {"aim_location": cfg.shoot_aim, "power": cfg.shoot_power})]
-        forwards = [p for p in players if _is_my_team(p, team_id) and _player_idx(p) in (3, 4)]
-        if forwards:
-            target = min(forwards, key=lambda p: abs(p.get("position", {}).get("x", 0) - opp_goal_x))
+        # Most advanced outfield teammate — never the GK or ourselves (our MID is
+        # player 3, so a fixed (3, 4) forward set would include the passer).
+        targets = [p for p in players
+                   if _is_my_team(p, team_id) and _player_idx(p) not in (0, my_player_id)]
+        if targets:
+            target = min(targets, key=lambda p: abs(p.get("position", {}).get("x", 0) - opp_goal_x))
             return [_cmd("PASS", my_player_id, team_id,
                          {"target_player_id": _player_idx(target), "type": "GROUND"})]
         return [_cmd("PASS", my_player_id, team_id,
-                     {"target_player_id": 3, "type": "GROUND"})]
+                     {"target_player_id": 4 if my_player_id == 3 else 3, "type": "GROUND"})]
 
     if cfg.possession_action == "SHOOT_OR_ADVANCE":
         if abs(pos.get("x", 0) - opp_goal_x) < cfg.shoot_threshold:

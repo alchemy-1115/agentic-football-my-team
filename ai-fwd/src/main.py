@@ -16,7 +16,7 @@ POSITION_LABEL = "FWD1"
 ROLE = """## Your Role — Forward (pivot / target striker)
 ALWAYS, in every mode:
 - You are the highest player. There is NO offside — camp on the shoulder of their last defender.
-- OPEN-GOAL RULE (top priority when you have the ball): if their goalkeeper (opponent player 0) is more than 20 units from THEIR goal, SHOOT immediately — aim_location "CENTER", power 1.0, from anywhere on the pitch.
+- OPEN-GOAL RULE (top priority when you have the ball): if the summary's "Opponent GK" line says OPEN GOAL, SHOOT immediately — aim_location "CENTER", power 1.0, from anywhere on the pitch.
 - Otherwise SHOOT from < 25 units: far corner, power 0.85.
 COUNTER (default):
 - You are the out-ball. When a teammate wins possession, sprint into the space behind their defense to receive the THROUGH/AERIAL pass — then finish.

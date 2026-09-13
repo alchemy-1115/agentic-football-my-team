@@ -2,6 +2,9 @@
 
 import math
 
+# Opponent GK further than this from their goal centre is flagged OPEN GOAL.
+OPEN_GOAL_GK_DIST = 20.0
+
 
 # ---------------------------------------------------------------------------
 # Format-agnostic helpers — handle both new (agentId/teamCode/possessionAgentId)
@@ -119,14 +122,17 @@ def summarize_state(
     # My player info
     if me:
         pos = me.get("position", {})
-        stam = me.get("stamina", 100)
+        stam = me.get("stamina", 1.0)
+        # The game server reports stamina as 0.0-1.0; show a percentage so
+        # ":.0f" doesn't round every value to 0 or 1.
+        stam_pct = stam * 100 if stam <= 1 else stam
         dist_ball = dist(pos, ball_pos)
         has_ball = possession_id == my_player_id
         extra = f" distOppGoal={abs(pos.get('x', 0) - opp_goal_x):.1f}" if position_label in ("MID", "FWD1", "FWD2") else ""
         lines.append(
             f">>> YOUR PLAYER ({position_label}, id={my_player_id}): "
             f"pos=({pos.get('x',0):.1f},{pos.get('y',0):.1f}) "
-            f"stam={stam:.0f} distBall={dist_ball:.1f}{extra} hasBall={has_ball}"
+            f"stam={stam_pct:.0f}% distBall={dist_ball:.1f}{extra} hasBall={has_ball}"
         )
     lines.append("")
 
@@ -154,6 +160,17 @@ def summarize_state(
         d_goal = abs(pos.get("x", 0) - my_goal_x)
         d_me = dist(pos, me.get("position", {})) if me else 0
         lines.append(f"  P{pid}: ({pos.get('x',0):.1f},{pos.get('y',0):.1f}) distToMyGoal={d_goal:.1f} distToMe={d_me:.1f}")
+
+    # Opponent GK distance from THEIR goal, pre-computed for the FWD open-goal
+    # rule — the list above only gives distToMyGoal, and light models can't be
+    # trusted to do the subtraction.
+    opp_gk = next((p for p in opponents if _player_idx(p) == 0), None)
+    if opp_gk:
+        gk_off = dist(opp_gk.get("position", {}), {"x": opp_goal_x, "y": 0})
+        lines.append(
+            f"Opponent GK: distFromTheirGoal={gk_off:.1f}"
+            + (" (OFF THEIR LINE — OPEN GOAL)" if gk_off > OPEN_GOAL_GK_DIST else "")
+        )
 
     # Parked-bus detector: how many opponents are inside OUR half right now.
     # Pre-computed so lightweight models can trigger BREAKDOWN without geometry.
