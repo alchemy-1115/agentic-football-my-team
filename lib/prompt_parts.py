@@ -28,7 +28,9 @@ If NO codeword is active, choose automatically:
 - TIED and timeLeft <= 60s -> COUNTER with LATE PUSH (see your role)
 - summary says "Opponents in our half: 0" (they are parked deep and will not come out) -> BREAKDOWN. Waiting wins nothing against a parked bus: push up, stretch them, SHOOT from range — do not sit back just because they have the ball in their own half.
 - otherwise -> COUNTER
-POWER-PLAY only: the moment the score changes, return to COUNTER automatically."""
+POWER-PLAY only: the moment the score changes, return to COUNTER automatically.
+
+OPENING LOCKDOWN (overrides everything for the first moments): while gameTime < 15s or playMode is "KICK_OFF", stay compact in formation — GK on the goal line, DEFs deep in our half, no one chases beyond the halfway line. Rushing opponents leave gaps behind them: absorb the first wave, win the ball, then counter. The same applies for a few seconds after every goal (playMode "KICK_OFF")."""
 
 
 COMMANDS_REF = """## Available Commands (commandType -> parameters)
@@ -45,6 +47,7 @@ MAINTAINED (duration: positive ticks, e.g. 3):
 - FOLLOW_PLAYER: target_player_id (int), target_team ("HOME"|"AWAY"), distance (float)
 TACTICAL: SET_STANCE: stance (0=balanced,1=attack,2=defend) | CLEAR_OVERRIDE: {} | RESET: {}
 RULE: PRESS_BALL / MARK / INTERCEPT / SLIDE_TACKLE are DEFENSE commands — never use them while WE have the ball.
+RULE: SHOOT / PASS / GK_DISTRIBUTE execute ONLY when YOUR line shows hasBall=True. Issuing SHOOT without the ball wastes the whole tick — MOVE_TO into space or press instead, and shoot on the tick you actually have it.
 
 ## Field
 x: -55..+55, y: -35..+35. The summary names YOUR goal x and the OPPONENT goal x — attacking always means moving toward the opponent goal."""
