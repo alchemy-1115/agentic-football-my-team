@@ -4,7 +4,8 @@ import os, sys; sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..",
 from _bootstrap import setup_lib_path; setup_lib_path(__file__)
 
 from bedrock_agentcore.runtime import BedrockAgentCoreApp
-from agent_base import create_agent, create_invoke_handler
+from memory_agent_base import create_agent
+from agent_base import create_invoke_handler
 from fallback import build_fallback, GK_CONFIG
 from prompt_parts import compose
 

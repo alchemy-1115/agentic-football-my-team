@@ -9,12 +9,17 @@ set -e
 #   AWS_PROFILE=your-profile ./deploy-all.sh          # deploy all
 #   AWS_PROFILE=your-profile ./deploy-all.sh ai-gk    # deploy one agent
 #
+# AgentCore Memory is created automatically when MEMORY_ID is unset.
+# Reuse an existing one with:  MEMORY_ID=xxx ./deploy-all.sh
+#
 # How it works:
-#   1. Creates a _build/<agent>/ staging directory for each agent
-#   2. Copies the agent's src/ + shared lib/ + requirements.txt into it
-#   3. Generates .bedrock_agentcore.yaml from the agent's template
-#   4. Deploys from the staging directory
-#   5. Cleans up _build/ when done
+#   1. Ensures the AgentCore Memory resource exists (create_memory.py)
+#   2. Creates a _build/<agent>/ staging directory for each agent
+#   3. Copies the agent's src/ + shared lib/ + requirements.txt into it
+#   4. Generates .bedrock_agentcore.yaml from the agent's template
+#   5. Deploys from the staging directory, injecting MEMORY_ID / AGENT_POSITION
+#   6. Attaches memory permissions to the agent execution roles
+#   7. Cleans up _build/ when done
 #
 # This avoids copying lib/ into each agent's source tree. You only ever
 # edit lib/ in one place.
@@ -80,6 +85,30 @@ AWS_ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text 2>/de
 export AWS_ACCOUNT_ID
 echo "  AWS Account: $AWS_ACCOUNT_ID"
 echo "  AWS Region:  $AWS_DEFAULT_REGION"
+echo ""
+
+# ------ AgentCore Memory resource ------
+if [ -z "$MEMORY_ID" ]; then
+  echo "MEMORY_ID not set — creating/looking up the memory resource..."
+  CREATE_OUTPUT=$(python3 "$SCRIPT_DIR/create_memory.py" 2>&1) || {
+    echo "$CREATE_OUTPUT"
+    echo "ERROR: create_memory.py failed."
+    exit 1
+  }
+  MEMORY_ID=$(echo "$CREATE_OUTPUT" | sed -n 's/.*Memory resource ready: \([^ ]*\).*/\1/p')
+  if [ -z "$MEMORY_ID" ]; then
+    echo "$CREATE_OUTPUT"
+    echo "ERROR: Could not parse MEMORY_ID from create_memory.py output."
+    exit 1
+  fi
+  echo "  MEMORY_ID: $MEMORY_ID (created/found)"
+else
+  echo "  MEMORY_ID: $MEMORY_ID (from env)"
+fi
+export MEMORY_ID
+TEAM_ID="${TEAM_ID:-my-team}"
+export TEAM_ID
+echo "  TEAM_ID:   $TEAM_ID"
 echo ""
 
 # ------ Tactical-tools Gateway (only for GATEWAY_AGENTS) ------
@@ -245,7 +274,11 @@ for agent in "${AGENTS[@]}"; do
 
   # Deploy from staging directory
   # Gateway agents get the MCP endpoint; everyone else deploys unchanged
-  DEPLOY_ARGS=(--auto-update-on-conflict)
+  DEPLOY_ARGS=(--auto-update-on-conflict
+    --env "MEMORY_ID=$MEMORY_ID"
+    --env "TEAM_ID=$TEAM_ID"
+    --env "AGENT_POSITION=$agent"
+    --env "AWS_DEFAULT_REGION=$AWS_DEFAULT_REGION")
   if is_gateway_agent "$agent"; then
     DEPLOY_ARGS+=(--env "GATEWAY_URL=$GATEWAY_URL")
   fi
@@ -261,6 +294,44 @@ for agent in "${AGENTS[@]}"; do
   echo ""
 done
 
+# ------ Attach memory permissions to execution roles ------
+# The auto-created execution role has no AgentCore Memory permissions, so the
+# agents would get AccessDenied on their first ListEvents/CreateEvent call.
+echo "Attaching AgentCore Memory permissions to execution roles..."
+set +e
+EXEC_ROLES=$(aws iam list-roles \
+  --query "Roles[?starts_with(RoleName, 'AmazonBedrockAgentCoreSDKRuntime-${AWS_DEFAULT_REGION}-')].RoleName" \
+  --output text 2>/dev/null)
+set -e
+
+if [ -n "$EXEC_ROLES" ]; then
+  for EXEC_ROLE_NAME in $EXEC_ROLES; do
+    aws iam put-role-policy \
+      --role-name "$EXEC_ROLE_NAME" \
+      --policy-name AgentCoreMemoryAccess \
+      --policy-document "{
+        \"Version\": \"2012-10-17\",
+        \"Statement\": [{
+          \"Effect\": \"Allow\",
+          \"Action\": [
+            \"bedrock-agentcore:ListEvents\",
+            \"bedrock-agentcore:CreateEvent\",
+            \"bedrock-agentcore:GetEvent\",
+            \"bedrock-agentcore:DeleteEvent\",
+            \"bedrock-agentcore:RetrieveMemoryRecords\",
+            \"bedrock-agentcore:GetMemoryRecord\",
+            \"bedrock-agentcore:ListMemoryRecords\"
+          ],
+          \"Resource\": \"arn:aws:bedrock-agentcore:${AWS_DEFAULT_REGION}:${AWS_ACCOUNT_ID}:memory/*\"
+        }]
+      }" 2>/dev/null && echo "  ✅ Memory permissions attached to: $EXEC_ROLE_NAME" \
+      || echo "  ⚠️  Failed to attach memory permissions to: $EXEC_ROLE_NAME"
+  done
+else
+  echo "  ⚠️  Could not find execution roles — attach AgentCoreMemoryAccess policy manually"
+fi
+echo ""
+
 # ------ Summary ------
 echo "=========================================="
 echo "  Deployment Summary"
@@ -270,6 +341,7 @@ echo "  Deployed: ${DEPLOYED[*]:-none}"
 echo "  Failed:   ${FAILED[*]:-none}"
 echo "  Account:  $AWS_ACCOUNT_ID"
 echo "  Region:   $AWS_DEFAULT_REGION"
+echo "  Memory:   $MEMORY_ID"
 if $NEEDS_GATEWAY; then
   echo "  Gateway:  $GATEWAY_URL"
 fi

@@ -68,6 +68,9 @@ def mock_agentcore_memory():
     session_mod = type(sys)("bedrock_agentcore.memory.integrations.strands.session_manager")
 
     strands_mod.AgentCoreMemorySessionManager = _FakeAgentCoreMemorySessionManager
+    # Agents import the class from its own submodule, so it must live there too
+    # (upstream lib only sets it on strands_mod, which breaks the import).
+    session_mod.AgentCoreMemorySessionManager = _FakeAgentCoreMemorySessionManager
     config_mod.AgentCoreMemoryConfig = _FakeAgentCoreMemoryConfig
 
     sys.modules["bedrock_agentcore.memory"] = mem_mod
