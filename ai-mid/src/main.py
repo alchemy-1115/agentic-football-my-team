@@ -33,7 +33,7 @@ SYSTEM_PROMPT = compose("midfielder", MY_PLAYER_ID, ROLE)
 
 fallback_commands = build_fallback(MID_CONFIG)
 
-agent = create_agent(SYSTEM_PROMPT, model_id="us.amazon.nova-pro-v1:0")
+agent = create_agent(SYSTEM_PROMPT, model_id="us.anthropic.claude-haiku-4-5-20251001-v1:0")
 create_invoke_handler(app, agent, MY_PLAYER_ID, POSITION_LABEL,
                       fallback_commands, fallback_cfg=MID_CONFIG)
 
