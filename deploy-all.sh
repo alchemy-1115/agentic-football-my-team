@@ -19,9 +19,16 @@ set -e
 # This avoids copying lib/ into each agent's source tree. You only ever
 # edit lib/ in one place.
 #
+# Agents in GATEWAY_AGENTS (ai-mid) also get the tactical-tools MCP Gateway:
+# the Lambdas in gateway_tools/, their IAM roles, and the Gateway + targets
+# (manage_gateway.py) are created or updated first, and the Gateway endpoint
+# is passed to those agents as GATEWAY_URL. Pre-set GATEWAY_URL to skip that.
+#
 # Prerequisites:
 #   pip install bedrock-agentcore-starter-toolkit
 #   aws configure (or set AWS_PROFILE)
+#   zip, and a python3 whose boto3 knows bedrock-agentcore-control
+#   (override with GATEWAY_PYTHON=/path/to/python)
 # ============================================================================
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
@@ -75,6 +82,119 @@ echo "  AWS Account: $AWS_ACCOUNT_ID"
 echo "  AWS Region:  $AWS_DEFAULT_REGION"
 echo ""
 
+# ------ Tactical-tools Gateway (only for GATEWAY_AGENTS) ------
+GATEWAY_AGENTS=("ai-mid")
+GATEWAY_NAME="alchemy-tactical-tools"
+LAMBDA_PREFIX="alchemy-gateway-tool"
+LAMBDA_ROLE_NAME="alchemy-gateway-tool-lambda-role"
+GW_ROLE_NAME="AlchemyGatewayExecutionRole"
+GATEWAY_PYTHON="${GATEWAY_PYTHON:-python3}"
+
+is_gateway_agent() {
+  local a
+  for a in "${GATEWAY_AGENTS[@]}"; do
+    [ "$a" = "$1" ] && return 0
+  done
+  return 1
+}
+
+NEEDS_GATEWAY=false
+for agent in "${AGENTS[@]}"; do
+  if is_gateway_agent "$agent"; then NEEDS_GATEWAY=true; fi
+done
+
+if $NEEDS_GATEWAY && [ -n "$GATEWAY_URL" ]; then
+  echo "Using pre-set GATEWAY_URL: $GATEWAY_URL"
+  echo ""
+elif $NEEDS_GATEWAY; then
+  if ! command -v zip &> /dev/null; then
+    echo "ERROR: 'zip' not found (needed to package the tool Lambdas)."
+    exit 1
+  fi
+
+  echo "=========================================="
+  echo "  Gateway 1/4: Lambda execution role"
+  echo "=========================================="
+  if LAMBDA_ROLE_ARN=$(aws iam get-role --role-name "$LAMBDA_ROLE_NAME" --query 'Role.Arn' --output text 2>/dev/null); then
+    echo "  Reusing: $LAMBDA_ROLE_ARN"
+  else
+    LAMBDA_ROLE_ARN=$(aws iam create-role --role-name "$LAMBDA_ROLE_NAME" \
+      --assume-role-policy-document '{"Version":"2012-10-17","Statement":[{"Effect":"Allow","Principal":{"Service":"lambda.amazonaws.com"},"Action":"sts:AssumeRole"}]}' \
+      --query 'Role.Arn' --output text)
+    aws iam attach-role-policy --role-name "$LAMBDA_ROLE_NAME" \
+      --policy-arn "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
+    echo "  Created: $LAMBDA_ROLE_ARN (waiting 10s for IAM propagation)"
+    sleep 10
+  fi
+  echo ""
+
+  echo "=========================================="
+  echo "  Gateway 2/4: Tool Lambdas"
+  echo "=========================================="
+  # "<target> <module>" per tool — the same schema file manage_gateway.py registers
+  TOOL_LINES=$(python3 -c 'import json, sys; [print(t["target"], t["module"]) for t in json.load(open(sys.argv[1]))]' \
+    "$SCRIPT_DIR/gateway_tools/tool_schemas.json")
+  # Read from fd 3 so no command inside the loop can swallow the remaining lines
+  while read -r target module <&3; do
+    FUNC_NAME="${LAMBDA_PREFIX}-${target}"
+    ZIP_DIR=$(mktemp -d)
+    (cd "$SCRIPT_DIR/gateway_tools" && zip -q "$ZIP_DIR/function.zip" "${module}.py" _game.py)
+    if aws lambda get-function --function-name "$FUNC_NAME" > /dev/null 2>&1; then
+      echo "  Updating: $FUNC_NAME"
+      aws lambda update-function-code --function-name "$FUNC_NAME" \
+        --zip-file "fileb://$ZIP_DIR/function.zip" > /dev/null
+      aws lambda wait function-updated-v2 --function-name "$FUNC_NAME"
+    else
+      echo "  Creating: $FUNC_NAME"
+      aws lambda create-function --function-name "$FUNC_NAME" \
+        --runtime python3.12 --handler "${module}.lambda_handler" \
+        --role "$LAMBDA_ROLE_ARN" --zip-file "fileb://$ZIP_DIR/function.zip" \
+        --timeout 10 --memory-size 256 > /dev/null
+      aws lambda wait function-active-v2 --function-name "$FUNC_NAME"
+    fi
+    rm -rf "$ZIP_DIR"
+  done 3<<< "$TOOL_LINES"
+  echo ""
+
+  echo "=========================================="
+  echo "  Gateway 3/4: Gateway execution role"
+  echo "=========================================="
+  GW_ROLE_CREATED=false
+  if GW_ROLE_ARN=$(aws iam get-role --role-name "$GW_ROLE_NAME" --query 'Role.Arn' --output text 2>/dev/null); then
+    echo "  Reusing: $GW_ROLE_ARN"
+  else
+    GW_ROLE_ARN=$(aws iam create-role --role-name "$GW_ROLE_NAME" \
+      --assume-role-policy-document '{"Version":"2012-10-17","Statement":[{"Effect":"Allow","Principal":{"Service":"bedrock-agentcore.amazonaws.com"},"Action":"sts:AssumeRole"}]}' \
+      --query 'Role.Arn' --output text)
+    GW_ROLE_CREATED=true
+    echo "  Created: $GW_ROLE_ARN"
+  fi
+  # Refreshed on every deploy; scoped to this team's tool Lambdas only
+  aws iam put-role-policy --role-name "$GW_ROLE_NAME" --policy-name InvokeTacticalToolLambdas \
+    --policy-document "{\"Version\":\"2012-10-17\",\"Statement\":[{\"Effect\":\"Allow\",\"Action\":\"lambda:InvokeFunction\",\"Resource\":\"arn:aws:lambda:${AWS_DEFAULT_REGION}:${AWS_ACCOUNT_ID}:function:${LAMBDA_PREFIX}-*\"}]}"
+  if $GW_ROLE_CREATED; then
+    echo "  Waiting 10s for IAM propagation..."
+    sleep 10
+  fi
+  echo ""
+
+  echo "=========================================="
+  echo "  Gateway 4/4: MCP Gateway + targets"
+  echo "=========================================="
+  GW_OUTPUT=$(GATEWAY_ROLE_ARN="$GW_ROLE_ARN" GATEWAY_NAME="$GATEWAY_NAME" LAMBDA_PREFIX="$LAMBDA_PREFIX" \
+    "$GATEWAY_PYTHON" "$SCRIPT_DIR/manage_gateway.py") || {
+    echo "ERROR: manage_gateway.py failed."
+    exit 1
+  }
+  GATEWAY_URL=$(printf '%s\n' "$GW_OUTPUT" | sed -n 's/^GATEWAY_URL=//p')
+  if [ -z "$GATEWAY_URL" ]; then
+    echo "ERROR: manage_gateway.py printed no GATEWAY_URL."
+    exit 1
+  fi
+  echo "  Gateway URL: $GATEWAY_URL"
+  echo ""
+fi
+
 # ------ Cleanup on exit ------
 cleanup() {
   echo ""
@@ -123,8 +243,14 @@ for agent in "${AGENTS[@]}"; do
     "$AGENT_SRC/.bedrock_agentcore.yaml.template" > "$STAGE/.bedrock_agentcore.yaml"
 
   # Deploy from staging directory
+  # Gateway agents get the MCP endpoint; everyone else deploys unchanged
+  DEPLOY_ARGS=(--auto-update-on-conflict)
+  if is_gateway_agent "$agent"; then
+    DEPLOY_ARGS+=(--env "GATEWAY_URL=$GATEWAY_URL")
+  fi
+
   echo "  Deploying from: $STAGE"
-  if (cd "$STAGE" && agentcore deploy --auto-update-on-conflict); then
+  if (cd "$STAGE" && agentcore deploy "${DEPLOY_ARGS[@]}"); then
     echo "  ✅ $agent: DEPLOYED"
     DEPLOYED+=("$agent")
   else
@@ -143,6 +269,9 @@ echo "  Deployed: ${DEPLOYED[*]:-none}"
 echo "  Failed:   ${FAILED[*]:-none}"
 echo "  Account:  $AWS_ACCOUNT_ID"
 echo "  Region:   $AWS_DEFAULT_REGION"
+if $NEEDS_GATEWAY; then
+  echo "  Gateway:  $GATEWAY_URL"
+fi
 echo ""
 
 if [ ${#FAILED[@]} -gt 0 ]; then

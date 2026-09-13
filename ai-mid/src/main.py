@@ -1,4 +1,4 @@
-"""my-team MID — Player 3. Nova Pro (the brain). Link play, width, parallela, segundo palo."""
+"""my-team MID — Player 3. Claude Haiku 4.5 (the brain) + AgentCore Gateway tactical tools. Link play, width, parallela, segundo palo."""
 
 import os, sys; sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "lib")); sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", "lib"))
 from _bootstrap import setup_lib_path; setup_lib_path(__file__)
@@ -6,6 +6,7 @@ from _bootstrap import setup_lib_path; setup_lib_path(__file__)
 from bedrock_agentcore.runtime import BedrockAgentCoreApp
 from agent_base import create_agent, create_invoke_handler
 from fallback import build_fallback, MID_CONFIG
+from gateway_client import TickContext, load_gateway_tools
 from prompt_parts import compose
 
 app = BedrockAgentCoreApp()
@@ -29,13 +30,25 @@ POWER-PLAY ("PP"): central distributor just outside their box; one- and two-touc
 SHOOT from < 25 units with a clear sight (far corner, power 0.8).
 Stamina: you cover the most ground — move with sprint:false whenever the ball is safe."""
 
-SYSTEM_PROMPT = compose("midfielder", MY_PLAYER_ID, ROLE)
+TOOLS_BLOCK = """## Tactical Tools (AgentCore Gateway)
+Every tool call adds a full extra round trip and slows your reply. Call AT MOST ONE tool per tick, and only when its answer would change your command:
+- You have the ball: calculate_pass_options (who is really open), or evaluate_shot when within ~30 units of their goal.
+- A teammate has the ball and you need to get open: find_open_space (zone "attack" or "midfield").
+- The opponent has the ball and you must pick a man: get_defensive_assignment.
+Otherwise answer directly without tools. The tools already know the match state — pass no positions. Coach codewords and your mode still decide WHAT you do; tools only refine the target. After a tool result, still return ONLY the JSON array."""
+
+# Gateway tools get the raw game state of the current tick attached per call
+tick = TickContext()
+tools = load_gateway_tools(tick, log=app.logger)
+
+# Only describe the tools when they actually loaded — otherwise the model calls tools that don't exist
+SYSTEM_PROMPT = compose("midfielder", MY_PLAYER_ID, ROLE + ("\n\n" + TOOLS_BLOCK if tools else ""))
 
 fallback_commands = build_fallback(MID_CONFIG)
 
-agent = create_agent(SYSTEM_PROMPT, model_id="us.anthropic.claude-haiku-4-5-20251001-v1:0")
+agent = create_agent(SYSTEM_PROMPT, model_id="us.anthropic.claude-haiku-4-5-20251001-v1:0", tools=tools)
 create_invoke_handler(app, agent, MY_PLAYER_ID, POSITION_LABEL,
-                      fallback_commands, fallback_cfg=MID_CONFIG)
+                      fallback_commands, fallback_cfg=MID_CONFIG, on_tick=tick.update)
 
 if __name__ == "__main__":
     app.run()

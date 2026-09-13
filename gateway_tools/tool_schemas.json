@@ -1,0 +1,71 @@
+[
+  {
+    "target": "calculate-pass-options",
+    "module": "calculate_pass_options",
+    "tool": {
+      "name": "calculate_pass_options",
+      "description": "Rank every teammate as a pass target for YOU: success probability, interception risk, distance, receiver distance to the opponent goal, and recommended pass type. Use when you have the ball. Takes no arguments — the current match state is attached automatically.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "game_state": {"type": "object", "description": "Attached automatically by the agent runtime."},
+          "team_id": {"type": "integer", "description": "Attached automatically by the agent runtime."},
+          "player_id": {"type": "integer", "description": "Attached automatically by the agent runtime."}
+        },
+        "required": ["game_state", "team_id", "player_id"]
+      }
+    }
+  },
+  {
+    "target": "evaluate-shot",
+    "module": "evaluate_shot",
+    "tool": {
+      "name": "evaluate_shot",
+      "description": "Estimate YOUR chance of scoring from where you stand, with the recommended aim_location and power and a should_shoot verdict. Use when you have the ball within about 30 units of the opponent goal. Takes no arguments — the current match state is attached automatically.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "game_state": {"type": "object", "description": "Attached automatically by the agent runtime."},
+          "team_id": {"type": "integer", "description": "Attached automatically by the agent runtime."},
+          "player_id": {"type": "integer", "description": "Attached automatically by the agent runtime."}
+        },
+        "required": ["game_state", "team_id", "player_id"]
+      }
+    }
+  },
+  {
+    "target": "find-open-space",
+    "module": "find_open_space",
+    "tool": {
+      "name": "find_open_space",
+      "description": "Find the reachable point farthest from every opponent inside a zone, for YOU to move to. Use when a teammate has the ball and you need to get open. The current match state is attached automatically.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "zone": {"type": "string", "description": "One of: attack, midfield, defense. Defaults to attack."},
+          "game_state": {"type": "object", "description": "Attached automatically by the agent runtime."},
+          "team_id": {"type": "integer", "description": "Attached automatically by the agent runtime."},
+          "player_id": {"type": "integer", "description": "Attached automatically by the agent runtime."}
+        },
+        "required": ["game_state", "team_id", "player_id"]
+      }
+    }
+  },
+  {
+    "target": "get-defensive-assignment",
+    "module": "get_defensive_assignment",
+    "tool": {
+      "name": "get_defensive_assignment",
+      "description": "Rank opponents by threat to our goal and recommend who YOU should mark (and how tightly). Use when the opponent has the ball and you must pick a man. Takes no arguments — the current match state is attached automatically.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "game_state": {"type": "object", "description": "Attached automatically by the agent runtime."},
+          "team_id": {"type": "integer", "description": "Attached automatically by the agent runtime."},
+          "player_id": {"type": "integer", "description": "Attached automatically by the agent runtime."}
+        },
+        "required": ["game_state", "team_id", "player_id"]
+      }
+    }
+  }
+]
