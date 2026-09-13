@@ -57,10 +57,24 @@ def distance(a: dict, b: dict) -> float:
     return math.hypot(a["x"] - b["x"], a["y"] - b["y"])
 
 
-def goals(team_id: int) -> tuple[dict, dict]:
-    """(my goal centre, opponent goal centre). HOME (team 0) defends -x."""
-    home, away = {"x": -55.0, "y": 0.0}, {"x": 55.0, "y": 0.0}
-    return (home, away) if team_id == 0 else (away, home)
+# Goalkeepers closer together than this can't tell us which end is whose.
+SIDE_GK_MIN_GAP = 20.0
+
+
+def goals(players: list, team_id: int) -> tuple[dict, dict]:
+    """(my goal centre, opponent goal centre), read from where the two GKs stand.
+
+    Mirrors lib/state.resolve_goal_positions: the GK further left defends the
+    left goal; falls back to HOME (team 0) defends -x when that can't be told.
+    """
+    left, right = {"x": -55.0, "y": 0.0}, {"x": 55.0, "y": 0.0}
+    my_gk = next((p for p in players if is_team(p, team_id) and player_idx(p) == 0), None)
+    opp_gk = next((p for p in players if not is_team(p, team_id) and player_idx(p) == 0), None)
+    if my_gk and opp_gk:
+        my_x, opp_x = position(my_gk)["x"], position(opp_gk)["x"]
+        if abs(my_x - opp_x) >= SIDE_GK_MIN_GAP:
+            return (left, right) if my_x < opp_x else (right, left)
+    return (left, right) if team_id == 0 else (right, left)
 
 
 def read_match(event: dict) -> dict:
@@ -86,7 +100,7 @@ def read_match(event: dict) -> dict:
 
     ball = game_state.get("ball") or {}
     holder_idx, holder_is_mine = possession(ball, players, team_id)
-    my_goal, opp_goal = goals(team_id)
+    my_goal, opp_goal = goals(players, team_id)
     return {
         "team_id": team_id,
         "player_id": player_id,

@@ -6,6 +6,12 @@ from here instead. The Strands Agent is wrapped in an
 AgentCoreMemorySessionManager, which keeps its conversation history across
 game ticks (short-term memory).
 
+Each match gets its own Memory session ("match-<team>-<position>-<start>"):
+agent_base calls start_new_match() on the first tick of every match. A single
+fixed session id replayed the previous match's history — including which way
+we were attacking — into every new match. The Strands Agent is only built on
+that first tick, so importing this module makes no AWS calls.
+
 Env vars, all injected by deploy-all.sh:
   MEMORY_ID       — AgentCore Memory resource ID (created by create_memory.py)
   AGENT_POSITION  — this runtime's agent name, e.g. "ai-gk"; keeps each
@@ -18,6 +24,9 @@ a shared AGENT_POSITION would interleave all five agents into one history.
 """
 
 import os
+import time
+import uuid
+
 from strands import Agent
 from strands.models import BedrockModel
 
@@ -33,12 +42,60 @@ Your conversation history carries what you already saw and did. Use it to:
 - Recall what already failed this match and stop repeating it"""
 
 
+class MatchScopedMemoryAgent:
+    """Callable like a Strands Agent, backed by a fresh AgentCore Memory session per match."""
+
+    def __init__(self, system_prompt: str, model_id: str, tools: list | None,
+                 memory_id: str, position: str, team_id: str) -> None:
+        self._system_prompt = system_prompt + MEMORY_PROMPT
+        self._model_id = model_id
+        self._tools = tools
+        self._memory_id = memory_id
+        self._position = position
+        self._team_id = team_id
+        self.agent: Agent | None = None
+        self.session_id: str | None = None
+
+    def start_new_match(self) -> None:
+        from bedrock_agentcore.memory.integrations.strands.config import AgentCoreMemoryConfig
+        from bedrock_agentcore.memory.integrations.strands.session_manager import AgentCoreMemorySessionManager
+
+        # Drop the old match's agent first, so a failed rebuild can't fall back to it
+        self.agent = None
+        started = time.strftime("%Y%m%dT%H%M%S", time.gmtime())
+        session_id = f"match-{self._team_id}-{self._position}-{started}-{uuid.uuid4().hex[:6]}"
+        session_manager = AgentCoreMemorySessionManager(
+            agentcore_memory_config=AgentCoreMemoryConfig(
+                memory_id=self._memory_id,
+                session_id=session_id,
+                actor_id=f"{self._team_id}-{self._position}",
+            ),
+            region_name=os.environ.get("AWS_REGION") or os.environ.get("AWS_DEFAULT_REGION"),
+        )
+        self.agent = Agent(
+            model=BedrockModel(model_id=self._model_id),
+            system_prompt=self._system_prompt,
+            tools=self._tools,
+            session_manager=session_manager,
+        )
+        self.session_id = session_id
+
+    @property
+    def messages(self) -> list:
+        return self.agent.messages if self.agent else []
+
+    def __call__(self, prompt, **kwargs):
+        if self.agent is None:
+            self.start_new_match()
+        return self.agent(prompt, **kwargs)
+
+
 def create_agent(
     system_prompt: str,
     model_id: str = "us.amazon.nova-micro-v1:0",
     tools: list | None = None,
-) -> Agent:
-    """Create a Strands Agent backed by AgentCore Memory (STM)."""
+) -> Agent | MatchScopedMemoryAgent:
+    """Create an agent backed by AgentCore Memory (STM), one session per match."""
     memory_id = os.environ.get("MEMORY_ID")
     position = os.environ.get("AGENT_POSITION")
     team_id = os.environ.get("TEAM_ID", "my-team")
@@ -48,21 +105,4 @@ def create_agent(
         print(f"WARNING: {missing} not set — falling back to a stateless agent")
         return create_stateless_agent(system_prompt, model_id, tools)
 
-    from bedrock_agentcore.memory.integrations.strands.config import AgentCoreMemoryConfig
-    from bedrock_agentcore.memory.integrations.strands.session_manager import AgentCoreMemorySessionManager
-
-    session_manager = AgentCoreMemorySessionManager(
-        agentcore_memory_config=AgentCoreMemoryConfig(
-            memory_id=memory_id,
-            session_id=f"match-{team_id}-{position}",
-            actor_id=f"{team_id}-{position}",
-        ),
-        region_name=os.environ.get("AWS_REGION") or os.environ.get("AWS_DEFAULT_REGION"),
-    )
-
-    return Agent(
-        model=BedrockModel(model_id=model_id),
-        system_prompt=system_prompt + MEMORY_PROMPT,
-        tools=tools,
-        session_manager=session_manager,
-    )
+    return MatchScopedMemoryAgent(system_prompt, model_id, tools, memory_id, position, team_id)

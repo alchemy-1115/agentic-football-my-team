@@ -41,10 +41,33 @@ def _possession_idx(ball: dict):
 
 
 def get_goal_positions(team_id: int) -> tuple[float, float]:
-    """Return (my_goal_x, opp_goal_x) based on team."""
+    """Return (my_goal_x, opp_goal_x) by convention: HOME (team 0) defends -x."""
     if team_id == 0:
         return -55.0, 55.0
     return 55.0, -55.0
+
+
+# Goalkeepers closer together than this can't tell us which end is whose.
+SIDE_GK_MIN_GAP = 20.0
+
+
+def resolve_goal_positions(players: list, team_id: int) -> tuple[float, float]:
+    """Return (my_goal_x, opp_goal_x), read from where the two goalkeepers stand.
+
+    teamId alone doesn't reliably say which end we defend — in a real match our
+    players kept attacking their own goal while it was on the right. Each GK
+    stays near its own goal, so the GK further left defends the left goal.
+    Falls back to the HOME-defends-left convention when a GK is missing or the
+    two are too close to call.
+    """
+    my_gk = next((p for p in players if _is_my_team(p, team_id) and _player_idx(p) == 0), None)
+    opp_gk = next((p for p in players if not _is_my_team(p, team_id) and _player_idx(p) == 0), None)
+    if my_gk and opp_gk:
+        my_x = my_gk.get("position", {}).get("x", 0)
+        opp_x = opp_gk.get("position", {}).get("x", 0)
+        if abs(my_x - opp_x) >= SIDE_GK_MIN_GAP:
+            return (-55.0, 55.0) if my_x < opp_x else (55.0, -55.0)
+    return get_goal_positions(team_id)
 
 
 def get_possession_info(ball: dict, players: list, team_id: int) -> tuple:
@@ -108,7 +131,7 @@ def summarize_state(
     me = next((p for p in my_team if _player_idx(p) == my_player_id), None)
     possession_id, ball_status, _ = get_possession_info(ball, players, team_id)
 
-    my_goal_x, opp_goal_x = get_goal_positions(team_id)
+    my_goal_x, opp_goal_x = resolve_goal_positions(players, team_id)
 
     lines = [
         _score_status_line(game_time, score, team_id),

@@ -11,7 +11,7 @@ from _game import ToolInputError, distance, error, read_match
 GRID_STEP = 5
 REACH_PENALTY = 0.15  # prefer space the player can actually get to
 
-# Zone x-ranges for HOME (defends -x); mirrored for AWAY.
+# Zone x-ranges for a team defending the left goal (-x); mirrored when defending the right.
 HOME_ZONES = {"defense": (-55, -15), "midfield": (-15, 15), "attack": (15, 52)}
 
 
@@ -29,7 +29,7 @@ def lambda_handler(event, context):
     if zone not in HOME_ZONES:
         zone = "midfield"
     x_min, x_max = HOME_ZONES[zone]
-    if match["team_id"] != 0:
+    if match["my_goal"]["x"] > 0:
         x_min, x_max = -x_max, -x_min
 
     me = match["me"]
