@@ -85,9 +85,9 @@ echo ""
 # ------ Tactical-tools Gateway (only for GATEWAY_AGENTS) ------
 GATEWAY_AGENTS=("ai-mid")
 GATEWAY_NAME="alchemy-tactical-tools"
-LAMBDA_PREFIX="alchemy-gateway-tool"
-LAMBDA_ROLE_NAME="alchemy-gateway-tool-lambda-role"
-GW_ROLE_NAME="AlchemyGatewayExecutionRole"
+LAMBDA_PREFIX="afwc-gateway-tool"
+LAMBDA_ROLE_NAME="afwc-gateway-tool-lambda-role"
+GW_ROLE_NAME="AfwcGatewayExecutionRole"
 GATEWAY_PYTHON="${GATEWAY_PYTHON:-python3}"
 
 is_gateway_agent() {
@@ -169,10 +169,11 @@ elif $NEEDS_GATEWAY; then
     GW_ROLE_CREATED=true
     echo "  Created: $GW_ROLE_ARN"
   fi
-  # Refreshed on every deploy; scoped to this team's tool Lambdas only
-  aws iam put-role-policy --role-name "$GW_ROLE_NAME" --policy-name InvokeTacticalToolLambdas \
-    --policy-document "{\"Version\":\"2012-10-17\",\"Statement\":[{\"Effect\":\"Allow\",\"Action\":\"lambda:InvokeFunction\",\"Resource\":\"arn:aws:lambda:${AWS_DEFAULT_REGION}:${AWS_ACCOUNT_ID}:function:${LAMBDA_PREFIX}-*\"}]}"
+  # Only on creation: the workshop-provided role already allows afwc-gateway-tool-*,
+  # and the participant role has no iam:PutRolePolicy on existing roles.
   if $GW_ROLE_CREATED; then
+    aws iam put-role-policy --role-name "$GW_ROLE_NAME" --policy-name InvokeTacticalToolLambdas \
+      --policy-document "{\"Version\":\"2012-10-17\",\"Statement\":[{\"Effect\":\"Allow\",\"Action\":\"lambda:InvokeFunction\",\"Resource\":\"arn:aws:lambda:${AWS_DEFAULT_REGION}:${AWS_ACCOUNT_ID}:function:${LAMBDA_PREFIX}-*\"}]}"
     echo "  Waiting 10s for IAM propagation..."
     sleep 10
   fi

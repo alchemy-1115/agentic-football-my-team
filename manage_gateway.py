@@ -13,7 +13,7 @@ Env vars:
   AWS_ACCOUNT_ID      required
   GATEWAY_ROLE_ARN    required — role the gateway assumes to invoke the Lambdas
   GATEWAY_NAME        (default: alchemy-tactical-tools)
-  LAMBDA_PREFIX       (default: alchemy-gateway-tool)
+  LAMBDA_PREFIX       (default: afwc-gateway-tool)
 """
 
 import json
@@ -26,7 +26,7 @@ import boto3
 
 REGION = os.environ.get("AWS_DEFAULT_REGION", "us-east-1")
 GATEWAY_NAME = os.environ.get("GATEWAY_NAME", "alchemy-tactical-tools")
-LAMBDA_PREFIX = os.environ.get("LAMBDA_PREFIX", "alchemy-gateway-tool")
+LAMBDA_PREFIX = os.environ.get("LAMBDA_PREFIX", "afwc-gateway-tool")
 SCHEMAS_FILE = Path(__file__).resolve().parent / "gateway_tools" / "tool_schemas.json"
 
 POLL_SECONDS = 5
